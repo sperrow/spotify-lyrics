@@ -2,8 +2,23 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import defaultTrack from './data/defaultTrack';
 import './Track.css';
 
-function Track(props) {
-    const currentTrack = useRef(defaultTrack);
+interface TrackProps {
+    token: string;
+    refreshToken: () => void;
+}
+
+interface Line {
+    startTimeMs: string;
+    words: string;
+}
+
+const defaultLine: Line = {
+    startTimeMs: '',
+    words: '',
+};
+
+function Track(props: TrackProps) {
+    const currentTrack = useRef({ ...defaultTrack });
     const currentLyrics = useRef([]);
     const isPlaying = useRef(false);
     const lyricsSynced = useRef(false);
@@ -13,51 +28,57 @@ function Track(props) {
 
     const [current_track, setTrack] = useState(currentTrack.current);
     const [current_lyrics, setLyrics] = useState(currentLyrics.current);
-    const [current_lyricLineId, setLyricLineId] = useState(undefined);
+    const [current_lyricLineId, setLyricLineId] = useState('');
     const [is_playing, setIsPlaying] = useState(false);
 
     const getCurrentlyPlaying = useCallback(async () => {
-        let response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${props.token}` },
-        });
-        if (!response.ok) {
-            console.error(response.error);
-            if (response.status === 401 || response.error.status === 401) {
-                props.refreshToken();
+        try {
+            const response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${props.token}` },
+            });
+            if (response.status === 204) {
+                return {};
             }
-        } else if (response.status !== 204) {
-            response = await response.json();
+            const result = await response.json();
+            if (!response.ok) {
+                console.error(result.error);
+                if (result.status === 401 || result.error?.status === 401) {
+                    props.refreshToken();
+                }
+            }
+            return result;
+        } catch (error) {
+            console.error('error:', error);
         }
-        return response;
     }, [props]);
 
     const getLyrics = useCallback(async () => {
         if (isNewSong.current) {
-            let response = await fetch('https://spotify-lyric-api.herokuapp.com/?trackid=' + currentTrack.current.id);
-            response = await response.json();
-            if (!response.error && response.lines) {
-                currentLyrics.current = response.lines;
+            const response = await fetch('https://spotify-lyric-api.herokuapp.com/?trackid=' + currentTrack.current.id);
+            const result = await response.json();
+            if (!result.error && result.lines) {
+                currentLyrics.current = result.lines;
                 setLyrics(currentLyrics.current);
-                lyricsSynced.current = response.syncType === 'LINE_SYNCED';
+                lyricsSynced.current = result.syncType === 'LINE_SYNCED';
             }
         }
         isNewSong.current = false;
-        findLine(currentTime.current);
+        findLine();
     }, []);
 
-    function findLine(currentMs) {
+    function findLine() {
         if (!lyricsSynced.current) {
-            setLyricLineId(undefined);
+            setLyricLineId('');
         } else {
-            let currentLyricLine = currentLyrics.current[0];
+            let currentLyricLine: Line = currentLyrics.current[0];
             for (let i = 0; i < currentLyrics.current.length; i++) {
-                const line = currentLyrics.current[i];
+                const line: Line = currentLyrics.current[i];
                 const lineMs = parseInt(line.startTimeMs, 10);
                 const buffer = 500; // display next line early
-                if (currentMs < lineMs - buffer) {
+                if (currentTime.current < lineMs - buffer) {
                     if (i === 0) {
-                        currentLyricLine = {};
+                        currentLyricLine = { ...defaultLine };
                     }
                     break;
                 }
@@ -85,7 +106,6 @@ function Track(props) {
                         setTrack(updatedTrack);
                     }
                 } catch (error) {
-                    console.log('error:', error);
                     run = false;
                     setIsPlaying(false);
                     isPlaying.current = false;
@@ -141,7 +161,7 @@ function Track(props) {
                     </div>
                     <div className="lyrics-container">
                         <div>
-                            {current_lyrics.map((line) => (
+                            {current_lyrics.map((line: Line) => (
                                 <div
                                     key={line.startTimeMs}
                                     className={line.startTimeMs === current_lyricLineId ? 'current-line' : ''}
