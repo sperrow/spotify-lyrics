@@ -5,7 +5,11 @@ import './Track.css';
 function Track(props) {
     const currentTrack = useRef(defaultTrack);
     const currentLyrics = useRef([]);
+    const isPlaying = useRef(false);
     const lyricsSynced = useRef(false);
+    const currentTime = useRef(0);
+    const isNewSong = useRef(false);
+    const timeFetched = useRef(false);
 
     const [current_track, setTrack] = useState(currentTrack.current);
     const [current_lyrics, setLyrics] = useState(currentLyrics.current);
@@ -28,9 +32,9 @@ function Track(props) {
         return response;
     }, [props]);
 
-    const getLyrics = useCallback(async (isNewSong, track, currentMs) => {
-        if (isNewSong) {
-            let response = await fetch('https://spotify-lyric-api.herokuapp.com/?trackid=' + track.id);
+    const getLyrics = useCallback(async () => {
+        if (isNewSong.current) {
+            let response = await fetch('https://spotify-lyric-api.herokuapp.com/?trackid=' + currentTrack.current.id);
             response = await response.json();
             if (!response.error && response.lines) {
                 currentLyrics.current = response.lines;
@@ -38,7 +42,8 @@ function Track(props) {
                 lyricsSynced.current = response.syncType === 'LINE_SYNCED';
             }
         }
-        findLine(currentMs);
+        isNewSong.current = false;
+        findLine(currentTime.current);
     }, []);
 
     function findLine(currentMs) {
@@ -49,8 +54,8 @@ function Track(props) {
             for (let i = 0; i < currentLyrics.current.length; i++) {
                 const line = currentLyrics.current[i];
                 const lineMs = parseInt(line.startTimeMs, 10);
-                if (currentMs < lineMs - 500) {
-                    // buffer
+                const buffer = 500; // display next line early
+                if (currentMs < lineMs - buffer) {
                     if (i === 0) {
                         currentLyricLine = {};
                     }
@@ -70,30 +75,45 @@ function Track(props) {
                 try {
                     const res = await getCurrentlyPlaying();
                     setIsPlaying(!!res.is_playing);
+                    isPlaying.current = !!res.is_playing;
                     if (res.item) {
                         const updatedTrack = res.item;
-                        const isNewSong = currentTrack.current.id !== updatedTrack.id;
+                        isNewSong.current = currentTrack.current.id !== updatedTrack.id;
                         currentTrack.current = updatedTrack;
+                        currentTime.current = res.progress_ms;
+                        timeFetched.current = true;
                         setTrack(updatedTrack);
-                        getLyrics(isNewSong, updatedTrack, res.progress_ms);
                     }
                 } catch (error) {
                     console.log('error:', error);
                     run = false;
                     setIsPlaying(false);
-                    clearInterval(interval);
+                    isPlaying.current = false;
+                    clearInterval(fetchInterval);
+                    clearInterval(timeInterval);
                 }
             }
         };
 
-        const interval = setInterval(() => {
+        const fetchInterval = setInterval(() => {
             fetchData();
         }, 1000);
+
+        const ms = 100;
+        const timeInterval = setInterval(() => {
+            getLyrics();
+            if (timeFetched.current) {
+                timeFetched.current = false;
+            } else if (isPlaying.current) {
+                currentTime.current += ms;
+            }
+        }, ms);
 
         fetchData();
 
         return () => {
-            clearInterval(interval);
+            clearInterval(fetchInterval);
+            clearInterval(timeInterval);
         };
     }, [getCurrentlyPlaying, getLyrics, props.token]);
 
